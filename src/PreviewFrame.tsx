@@ -2,6 +2,7 @@ import React, { ReactNode, useEffect, useRef } from "react";
 import { wrap, transfer, Remote } from "comlink";
 import { CompilationResult } from "./useCompiler";
 import { Meta } from "./compilerWorker/compiler";
+import { PREVIEW_ORIGIN } from "./config";
 
 type PreviewService = {
   render: (
@@ -44,7 +45,7 @@ export function PreviewFrame({
     <iframe
       ref={iframeRef}
       title="preview"
-      src="https://localhost.showmax.com:3000/preview.html"
+      src={`${PREVIEW_ORIGIN}/preview.html`}
       sandbox="allow-scripts allow-same-origin"
       onLoad={() => {
         if (!iframeRef.current || !iframeRef.current.contentWindow) {
@@ -77,7 +78,7 @@ export function PreviewFrame({
       style={{
         width: "100%",
         height: "100%",
-        border: "none"
+        border: "2px solid black"
       }}
     />
   );
