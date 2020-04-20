@@ -1,5 +1,4 @@
 import React, { useEffect, useRef } from "react";
-import "./App.css";
 import { useCompiler } from "./useCompiler";
 import { usePreventSave } from "./usePreventSave";
 import { PreviewFrame } from "./PreviewFrame";

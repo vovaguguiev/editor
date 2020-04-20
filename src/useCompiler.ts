@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { wrap } from "comlink";
 import { CompilerWorker } from "./compilerWorker";
+// @ts-ignore
+// eslint-disable-next-line import/no-webpack-loader-syntax
+import Worker from "worker-loader!./compilerWorker";
 import { Meta } from "./compilerWorker/compiler";
 
-const compilerWorker = new Worker("./compilerWorker", {
-  name: "compiler-worker",
-  type: "module"
-});
-const workerApi = wrap<CompilerWorker>(compilerWorker);
+const workerApi = wrap<CompilerWorker>(new Worker());
 
 export type CompilationResult = ResultSuccess | ResultFailure;
 

@@ -1,4 +1,4 @@
-import React, { ReactNode, useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { wrap, transfer, Remote } from "comlink";
 import { CompilationResult } from "./useCompiler";
 import { Meta } from "./compilerWorker/compiler";
