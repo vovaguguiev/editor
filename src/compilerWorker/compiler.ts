@@ -71,31 +71,17 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
               const importSpecifiers = path.node.specifiers;
 
               const isImportAll = importSpecifiers.every(
-                (
-                  s:
-                    | ImportSpecifier
-                    | ImportDefaultSpecifier
-                    | ImportNamespaceSpecifier
-                ) => isImportNamespaceSpecifier(s)
+                (s: ImportSpecifier | ImportDefaultSpecifier | ImportNamespaceSpecifier) =>
+                  isImportNamespaceSpecifier(s)
               );
 
-              const globalVariableNameId = identifier(
-                moduleIdentifier === "react" ? "React" : "Framer"
-              );
+              const globalVariableNameId = identifier(moduleIdentifier === "react" ? "React" : "Framer");
 
               if (isImportAll) {
-                const globalVarNameId = identifier(
-                  importSpecifiers[0].local.name
-                );
+                const globalVarNameId = identifier(importSpecifiers[0].local.name);
                 path.replaceWith(
                   variableDeclaration("const", [
-                    variableDeclarator(
-                      globalVarNameId,
-                      memberExpression(
-                        identifier("window"),
-                        globalVariableNameId
-                      )
-                    )
+                    variableDeclarator(globalVarNameId, memberExpression(identifier("window"), globalVariableNameId))
                   ])
                 );
               } else {
@@ -105,17 +91,12 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
                       objectPattern(
                         importSpecifiers.map(s => {
                           return objectProperty(
-                            identifier(
-                              isImportSpecifier(s) ? s.imported.name : "default"
-                            ),
+                            identifier(isImportSpecifier(s) ? s.imported.name : "default"),
                             identifier(s.local.name)
                           );
                         })
                       ),
-                      memberExpression(
-                        identifier("window"),
-                        globalVariableNameId
-                      )
+                      memberExpression(identifier("window"), globalVariableNameId)
                     )
                   ])
                 );
@@ -144,8 +125,7 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
               meta.exportSpecifiers.push(...componentNames);
 
               if (isPotentiallyReactComponent(declaration)) {
-                meta.componentsBySpecifier[componentNames[0]] =
-                  componentNames[0];
+                meta.componentsBySpecifier[componentNames[0]] = componentNames[0];
               }
               return;
             }
@@ -158,9 +138,7 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
                 meta.exportSpecifiers.push(exportedName);
                 if (!Array.isArray(path.container)) continue;
 
-                const declaration = path.container.find(
-                  (sibling: any) => sibling?.id?.name === localName
-                );
+                const declaration = path.container.find((sibling: any) => sibling?.id?.name === localName);
                 if (!isPotentiallyReactComponent(declaration)) continue;
 
                 meta.componentsBySpecifier[exportedName] = localName;
@@ -178,10 +156,7 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
           ExportDefaultDeclaration(path: NodePath<ExportDefaultDeclaration>) {
             const { declaration } = path.node;
 
-            if (
-              isFunctionDeclaration(declaration) ||
-              isClassDeclaration(declaration)
-            ) {
+            if (isFunctionDeclaration(declaration) || isClassDeclaration(declaration)) {
               meta.exportSpecifiers.push("default");
               meta.componentsBySpecifier["default"] = declaration.id.name;
             }
@@ -191,7 +166,9 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
       require("@babel/plugin-syntax-jsx").default,
       require("@babel/plugin-transform-react-jsx").default,
       require("@babel/plugin-transform-react-display-name").default,
-      [require("@babel/plugin-transform-typescript").default, { isTSX: true }]
+      [require("@babel/plugin-transform-typescript").default, { isTSX: true }],
+      // TODO: enAble this plugin only when "Fast Refresh" feature is turned on
+      [require("react-refresh/babel"), { skipEnvCheck: true }]
     ]
   })?.code;
 
@@ -207,9 +184,7 @@ function isPotentiallyReactComponent(declaration: any): boolean {
   return isFunctionDeclaration(declaration) || isClassDeclaration(declaration);
 }
 
-function getNamesFromVariableDeclaration(
-  varDeclaration: VariableDeclaration
-): string[] {
+function getNamesFromVariableDeclaration(varDeclaration: VariableDeclaration): string[] {
   return varDeclaration.declarations.reduce((result: string[], declarator) => {
     const { id } = declarator;
 
