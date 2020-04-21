@@ -5,34 +5,19 @@ import { Meta } from "./compilerWorker/compiler";
 import { PREVIEW_ORIGIN } from "./config";
 
 type PreviewService = {
-  render: (
-    meta: Meta,
-    codeBuffer: ArrayBuffer,
-    hash: string,
-    timestamp: number
-  ) => void;
+  render: (meta: Meta, codeBuffer: ArrayBuffer, hash: string, timestamp: number) => void;
 };
 
-export function PreviewFrame({
-  compilationResult
-}: {
-  compilationResult: CompilationResult | undefined;
-}) {
+export function PreviewFrame({ compilationResult }: { compilationResult: CompilationResult | undefined }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const previewServiceRef = useRef<Remote<PreviewService> | undefined>(
-    undefined
-  );
+  const previewServiceRef = useRef<Remote<PreviewService> | undefined>(undefined);
 
-  const key =
-    compilationResult?.type === "success" ? compilationResult.hash : "failure";
+  const key = compilationResult?.type === "success" ? compilationResult.hash : "failure";
   useEffect(() => {
     const previewService = previewServiceRef.current;
     if (!previewService || compilationResult?.type !== "success") return;
 
-    console.log(
-      "editor: sending compilation result to preview %dms",
-      Date.now() - compilationResult.timestamp
-    );
+    console.log("editor: sending compilation result to preview %dms", Date.now() - compilationResult.timestamp);
     previewService.render(
       compilationResult.meta,
       transfer(compilationResult.codeBuffer, [compilationResult.codeBuffer]),
@@ -63,9 +48,7 @@ export function PreviewFrame({
           if (compilationResult?.type === "success") {
             previewService.render(
               compilationResult.meta,
-              transfer(compilationResult.codeBuffer, [
-                compilationResult.codeBuffer
-              ]),
+              transfer(compilationResult.codeBuffer, [compilationResult.codeBuffer]),
               compilationResult.hash,
               compilationResult.timestamp
             );
@@ -77,7 +60,7 @@ export function PreviewFrame({
       }}
       style={{
         width: "100%",
-        height: "100%",
+        height: "calc(100% - 30px)",
         border: "2px solid black"
       }}
     />

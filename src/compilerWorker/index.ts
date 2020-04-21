@@ -4,10 +4,10 @@ import { compile } from "./compiler";
 const encoder = new TextEncoder();
 
 const workerInterface = {
-  async compile(sourceCode: string, timestamp: number) {
+  async compile(sourceCode: string, timestamp: number, options: { fastRefresh: boolean }) {
     console.log("worker: received code %dms", Date.now() - timestamp);
 
-    const { meta, code } = compile(sourceCode);
+    const { meta, code } = compile(sourceCode, options);
     console.log("worker: compilation done %dms", Date.now() - timestamp);
 
     const data = encoder.encode(code);

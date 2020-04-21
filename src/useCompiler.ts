@@ -24,16 +24,17 @@ interface ResultFailure {
 }
 
 export function useCompiler(
+  fastRefresh: boolean,
   initialSourceCode?: string
 ): {
   result: CompilationResult | undefined;
-  compile: (sourceCode: string, timestamp: number) => void;
+  compile: (sourceCode: string, timestamp: number, fastRefresh: boolean) => void;
 } {
   const [result, setResult] = useState<CompilationResult | undefined>();
   const unmountedRef = useRef(false);
 
   useEffect(() => {
-    if (initialSourceCode) compile(initialSourceCode, Date.now());
+    if (initialSourceCode) compile(initialSourceCode, Date.now(), fastRefresh);
 
     return () => {
       unmountedRef.current = true;
@@ -41,14 +42,11 @@ export function useCompiler(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function compile(sourceCode: string, timestamp: number) {
+  async function compile(sourceCode: string, timestamp: number, fastRefresh: boolean) {
     try {
       if (unmountedRef.current) return;
 
-      const { meta, codeBuffer, hash } = await workerApi.compile(
-        sourceCode,
-        timestamp
-      );
+      const { meta, codeBuffer, hash } = await workerApi.compile(sourceCode, timestamp, { fastRefresh });
       if (unmountedRef.current) return;
 
       setResult({ type: "success", meta, codeBuffer, hash, timestamp });
