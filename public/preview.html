@@ -38,13 +38,17 @@
         Comlink.expose({ render }, portToParent);
       });
 
+      let sourceFileURL;
       async function render(meta, codeArrayBuffer, hash, timestamp) {
         console.log("preview: received code %dms", Date.now() - timestamp);
         const blob = new Blob([codeArrayBuffer], {
           type: "text/javascript;charset=utf-8"
         });
-        // FIXME: release the old URLs
-        const url = URL.createObjectURL(blob);
+
+        // Dispose the previously created source file
+        if (sourceFileURL) URL.revokeObjectURL(sourceFileURL);
+        sourceFileURL = URL.createObjectURL(blob);
+
         try {
           // prepare React Fast Refresh runtime
           const prevRefreshReg = window.$RefreshReg$;
@@ -56,7 +60,7 @@
           };
           window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
 
-          const mod = await import(url);
+          const mod = await import(sourceFileURL);
 
           // cleanup React Fast Refresh runtime
           window.$RefreshReg$ = prevRefreshReg;
