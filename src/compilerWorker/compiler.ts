@@ -33,10 +33,16 @@ import {
 export interface Meta {
   exportSpecifiers: string[];
   componentsBySpecifier: { [exportSpecifier: string]: string };
+  localDependencies: string[];
 }
 
 export function compile(sourceCode: string): { meta: Meta; code: string } {
-  const meta: Meta = { exportSpecifiers: [], componentsBySpecifier: {} };
+  const meta: Meta = {
+    exportSpecifiers: [],
+    componentsBySpecifier: {},
+    localDependencies: []
+  };
+  const localDependenciesSet = new Set<string>();
 
   const compiledCode = transform(sourceCode, {
     babelrc: false,
@@ -56,6 +62,11 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
         visitor: {
           ImportDeclaration(path: NodePath<ImportDeclaration>) {
             const moduleIdentifier = path.node.source.value;
+
+            if (moduleIdentifier.startsWith("./")) {
+              localDependenciesSet.add(moduleIdentifier);
+            }
+
             if (moduleIdentifier === "react" || moduleIdentifier === "framer") {
               const importSpecifiers = path.node.specifiers;
 
@@ -112,7 +123,11 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
             }
           },
           ExportNamedDeclaration(path: NodePath<ExportNamedDeclaration>) {
-            const { exportKind, specifiers, declaration } = path.node;
+            const { exportKind, specifiers, declaration, source } = path.node;
+
+            if (source?.value.startsWith("./")) {
+              localDependenciesSet.add(source.value);
+            }
 
             // skip type exports
             if (exportKind === "type") return;
@@ -179,7 +194,10 @@ export function compile(sourceCode: string): { meta: Meta; code: string } {
       [require("@babel/plugin-transform-typescript").default, { isTSX: true }]
     ]
   })?.code;
+
   assert(compiledCode, "Transform didn't produce any code");
+
+  meta.localDependencies = Array.from(localDependenciesSet);
 
   return { meta, code: compiledCode };
 }
