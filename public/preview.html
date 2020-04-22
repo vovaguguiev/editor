@@ -1,150 +1,158 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Editor preview</title>
+    <head>
+        <meta charset="UTF-8" />
+        <title>Editor preview</title>
 
-    <!-- React Fast Refresh initialization below -->
-    <!-- See https://github.com/facebook/react/issues/16604#issuecomment-528663101 for more info -->
-    <script>
-      var module = {};
-      var process = { env: { NODE_ENV: "development" } };
-    </script>
-    <script src="https://unpkg.com/react-refresh@0.8.1/cjs/react-refresh-runtime.development.js" crossorigin></script>
-    <script>
-      window.RefreshRuntime = module.exports;
-      delete window.module;
-      delete window.process;
+        <!-- React Fast Refresh initialization below -->
+        <!-- See https://github.com/facebook/react/issues/16604#issuecomment-528663101 for more info -->
+        <script>
+            var module = {};
+            var process = { env: { NODE_ENV: "development" } };
+        </script>
+        <script
+            src="https://unpkg.com/react-refresh@0.8.1/cjs/react-refresh-runtime.development.js"
+            crossorigin
+        ></script>
+        <script>
+            window.RefreshRuntime = module.exports;
+            delete window.module;
+            delete window.process;
 
-      RefreshRuntime.injectIntoGlobalHook(window);
-      window.$RefreshReg$ = () => {};
-      window.$RefreshSig$ = () => type => type;
-    </script>
+            RefreshRuntime.injectIntoGlobalHook(window);
+            window.$RefreshReg$ = () => {};
+            window.$RefreshSig$ = () => type => type;
+        </script>
 
-    <script src="https://unpkg.com/react@16/umd/react.development.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js" crossorigin></script>
-  </head>
-  <body>
-    <div id="preview"></div>
-    <script type="module">
-      import * as Comlink from "https://unpkg.com/comlink/dist/esm/comlink.mjs";
+        <script src="https://unpkg.com/react@16/umd/react.development.js" crossorigin></script>
+        <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js" crossorigin></script>
+    </head>
+    <body>
+        <div id="preview"></div>
+        <script type="module">
+            import * as Comlink from "https://unpkg.com/comlink/dist/esm/comlink.mjs";
 
-      window.addEventListener("message", ev => {
-        if (ev.data !== "init") return;
+            window.addEventListener("message", ev => {
+                if (ev.data !== "init") return;
 
-        const portToParent = ev.ports[0];
-        portToParent.start();
-        portToParent.postMessage("ready");
-        Comlink.expose({ render }, portToParent);
-      });
+                const portToParent = ev.ports[0];
+                portToParent.start();
+                portToParent.postMessage("ready");
+                Comlink.expose({ render }, portToParent);
+            });
 
-      let sourceFileURL;
-      async function render(meta, codeArrayBuffer, hash, timestamp) {
-        console.log("preview: received code %dms", Date.now() - timestamp);
-        const blob = new Blob([codeArrayBuffer], {
-          type: "text/javascript;charset=utf-8"
-        });
+            // FIXME: cancel the pending render if the new one is requested
+            async function render(meta, codeArrayBuffer, hash, timestamp) {
+                console.log("preview: received code %dms", Date.now() - timestamp);
+                const blob = new Blob([codeArrayBuffer], {
+                    type: "text/javascript;charset=utf-8"
+                });
 
-        // Dispose the previously created source file
-        if (sourceFileURL) URL.revokeObjectURL(sourceFileURL);
-        sourceFileURL = URL.createObjectURL(blob);
+                const sourceFileURL = URL.createObjectURL(blob);
 
-        try {
-          // prepare React Fast Refresh runtime
-          const prevRefreshReg = window.$RefreshReg$;
-          const prevRefreshSig = window.$RefreshSig$;
-          window.$RefreshReg$ = (type, id) => {
-            // FIXME: use "real" file name
-            const fullId = "index.js" + " " + id;
-            RefreshRuntime.register(type, fullId);
-          };
-          window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+                try {
+                    // prepare React Fast Refresh runtime
+                    const prevRefreshReg = window.$RefreshReg$;
+                    const prevRefreshSig = window.$RefreshSig$;
+                    window.$RefreshReg$ = (type, id) => {
+                        // FIXME: use "real" file name
+                        const fullId = "index.js" + " " + id;
+                        RefreshRuntime.register(type, fullId);
+                    };
+                    window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
 
-          const mod = await import(sourceFileURL);
+                    const mod = await import(sourceFileURL);
+                    // Dispose the previously created source file
+                    URL.revokeObjectURL(sourceFileURL);
 
-          // cleanup React Fast Refresh runtime
-          window.$RefreshReg$ = prevRefreshReg;
-          window.$RefreshSig$ = prevRefreshSig;
-          if (isReactRefreshBoundary(mod)) {
-            // TODO: debounce this call if there multiple modules
-            RefreshRuntime.performReactRefresh();
-          }
+                    // cleanup React Fast Refresh runtime
+                    window.$RefreshReg$ = prevRefreshReg;
+                    window.$RefreshSig$ = prevRefreshSig;
+                    if (isReactRefreshBoundary(mod)) {
+                        // TODO: debounce this call if there multiple modules
+                        RefreshRuntime.performReactRefresh();
+                    }
 
-          console.log("preview: code evaluated %c%dms", "color: yellow", Date.now() - timestamp);
-          // first exported component
-          const component = mod[Object.keys(meta.componentsBySpecifier)[0]];
-          ReactDOM.render(
-            React.createElement(
-              Preview,
-              {
-                /*key: hash*/
-              },
-              React.createElement(component)
-            ),
-            document.getElementById("preview")
-          );
-        } catch (err) {
-          console.log("err, took:", Date.now() - timestamp);
-          console.log({ err });
-        }
-      }
+                    console.log("preview: code evaluated %c%dms", "color: yellow", Date.now() - timestamp);
+                    // first exported component
+                    const componentSpecifiers = Object.keys(meta.componentsBySpecifier);
+                    const component = componentSpecifiers.length > 0 ? mod[componentSpecifiers[0]] : null;
+                    ReactDOM.render(
+                        React.createElement(
+                            Preview,
+                            {
+                                /*key: hash*/
+                            },
+                            component ? React.createElement(component) : null
+                        ),
+                        document.getElementById("preview")
+                    );
+                } catch (err) {
+                    console.log("err, took:", Date.now() - timestamp);
+                    console.log({ err });
+                }
+            }
 
-      class Preview extends React.Component {
-        constructor(props) {
-          super(props);
-          this.state = { error: undefined };
-        }
+            class Preview extends React.Component {
+                constructor(props) {
+                    super(props);
+                    this.state = { error: undefined };
+                }
 
-        static getDerivedStateFromError(error) {
-          return { error };
-        }
+                static getDerivedStateFromError(error) {
+                    return { error };
+                }
 
-        componentDidCatch(error, errorInfo) {
-          console.warn("Preview error: ", error, errorInfo);
-        }
+                componentDidCatch(error, errorInfo) {
+                    console.warn("Preview error: ", error, errorInfo);
+                }
 
-        render() {
-          const error = this.props.error || this.state.error;
-          console.log({
-            stateError: this.state.error,
-            propsError: this.props.error
-          });
+                render() {
+                    const error = this.props.error || this.state.error;
+                    console.log({
+                        stateError: this.state.error,
+                        propsError: this.props.error
+                    });
 
-          if (error) {
-            return React.createElement("code", { style: { fontSize: 13, whiteSpace: "pre-wrap" } }, error.toString());
-          }
+                    if (error) {
+                        return React.createElement(
+                            "code",
+                            { style: { fontSize: 13, whiteSpace: "pre-wrap" } },
+                            error.toString()
+                        );
+                    }
 
-          return this.props.children ?? null;
-        }
-      }
+                    return this.props.children ?? null;
+                }
+            }
 
-      function isReactRefreshBoundary(moduleExports) {
-        if (RefreshRuntime.isLikelyComponentType(moduleExports)) {
-          return true;
-        }
-        if (moduleExports == null || typeof moduleExports !== "object") {
-          // Exit if we can't iterate over exports.
-          return false;
-        }
-        let hasExports = false;
-        let areAllExportsComponents = true;
-        for (const key in moduleExports) {
-          hasExports = true;
-          if (key === "__esModule") {
-            continue;
-          }
-          const desc = Object.getOwnPropertyDescriptor(moduleExports, key);
-          if (desc && desc.get) {
-            // Don't invoke getters as they may have side effects.
-            return false;
-          }
-          const exportValue = moduleExports[key];
-          if (!RefreshRuntime.isLikelyComponentType(exportValue)) {
-            areAllExportsComponents = false;
-          }
-        }
-        return hasExports && areAllExportsComponents;
-      }
-    </script>
-  </body>
+            function isReactRefreshBoundary(moduleExports) {
+                if (RefreshRuntime.isLikelyComponentType(moduleExports)) {
+                    return true;
+                }
+                if (moduleExports == null || typeof moduleExports !== "object") {
+                    // Exit if we can't iterate over exports.
+                    return false;
+                }
+                let hasExports = false;
+                let areAllExportsComponents = true;
+                for (const key in moduleExports) {
+                    hasExports = true;
+                    if (key === "__esModule") {
+                        continue;
+                    }
+                    const desc = Object.getOwnPropertyDescriptor(moduleExports, key);
+                    if (desc && desc.get) {
+                        // Don't invoke getters as they may have side effects.
+                        return false;
+                    }
+                    const exportValue = moduleExports[key];
+                    if (!RefreshRuntime.isLikelyComponentType(exportValue)) {
+                        areAllExportsComponents = false;
+                    }
+                }
+                return hasExports && areAllExportsComponents;
+            }
+        </script>
+    </body>
 </html>
