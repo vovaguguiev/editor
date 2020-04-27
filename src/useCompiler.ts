@@ -6,6 +6,7 @@ import Worker from "worker-loader!./compilerWorker";
 import { assert } from "./assert";
 import { absolutePath } from "./absolutePath";
 import { AbortError } from "./AbortError";
+import { hashCode } from "./hashCode";
 
 const compilerService = wrap<CompilerWorker>(new Worker());
 
@@ -16,7 +17,7 @@ type ComponentName = string;
 
 export type Module = {
     path: AbsPath;
-    hash: Hash;
+    sourceHash: Hash;
     codeBuffer: ArrayBuffer;
     localDependencies: DependenciesDict;
     componentsBySpecifier: Record<ExportSpecifier, ComponentName>;
@@ -24,14 +25,13 @@ export type Module = {
 
 type DependenciesDict = Record<AbsPath, Hash>;
 
-const compilerCache = {} as {
-    [path: string]:
-        | { status: "pending" /*completion: Promise<void>*/ }
-        | {
-              status: "done";
-              mod: Module;
-          };
+type CacheItemPending = { status: "pending" /*completion: Promise<void>*/ };
+type CacheItemDone = {
+    status: "done";
+    mod: Module;
 };
+type CacheItem = CacheItemPending | CacheItemDone;
+const compilerCache = {} as Record<AbsPath, CacheItem>;
 
 interface PreviewComponentData {
     type: "componentData";
@@ -123,88 +123,77 @@ async function compileAndCache({
     if (!sourceCode) {
         return { type: "failure", error: new Error(`${path} is not found`) };
     }
+    const sourceHash = String(hashCode(sourceCode));
 
-    // FIXME: don't compile if it's already in cache and up-to-date
-    const workerCompileResult = await compilerService.compile(sourceCode, timestamp, { fastRefresh });
-    if (signal.aborted) throw new AbortError();
+    const cacheItem = compilerCache[path];
+    let localDependencyModules;
+    let mod: Module;
 
-    if (workerCompileResult.type === "failure") {
-        return { type: "failure", error: workerCompileResult.error };
-    }
-
-    compilerCache[path] = { status: "pending" };
-
-    // Make sure all the dependencies are hashed too
-    for (const dep of workerCompileResult.localDependencies) {
-        const depPath = absolutePath(path, dep);
-        // FIXME: don't compile if the module is already in cache
-        // if (compilerCache[depPath]) {
-        //     // Dependency module is already in cache
-        //     affectedModules.add(depPath);
-        //     continue;
-        // }
-
-        compilerCache[depPath] = { status: "pending" };
-        const depResult = await compileAndCache({
-            path: depPath,
-            readFile,
-            affectedModules,
-            fastRefresh,
-            signal,
-            timestamp
-        });
-        if (compilerCache[depPath].status === "pending") {
-            delete compilerCache[depPath];
+    if (cacheItem?.status === "done" && cacheItem.mod.sourceHash === sourceHash) {
+        mod = cacheItem.mod;
+        localDependencyModules = Object.keys(cacheItem.mod.localDependencies);
+    } else {
+        const workerCompileResult = await compilerService.compile(sourceCode, timestamp, { fastRefresh });
+        if (signal.aborted) throw new AbortError();
+        if (workerCompileResult.type === "failure") {
+            return { type: "failure", error: workerCompileResult.error };
         }
-        if (signal.aborted) {
-            if (compilerCache[path]?.status === "pending") delete compilerCache[path];
-            throw new AbortError();
-        }
-
-        if (depResult.type === "failure") {
-            if (compilerCache[path]?.status === "pending") delete compilerCache[path];
-            throw depResult;
-        }
-
-        compilerCache[depPath] = {
-            status: "done",
-            mod: {
-                path: depPath,
-                hash: depResult.hash,
-                codeBuffer: depResult.codeBuffer,
-                localDependencies: depResult.localDependencies,
-                componentsBySpecifier: depResult.componentsBySpecifier
-            }
+        compilerCache[path] = { status: "pending" };
+        mod = {
+            path,
+            sourceHash,
+            codeBuffer: workerCompileResult.codeBuffer,
+            componentsBySpecifier: workerCompileResult.componentsBySpecifier,
+            // we will fill it after processing all of the dependencies
+            localDependencies: {}
         };
+        localDependencyModules = workerCompileResult.localDependencies;
     }
 
-    const localDependencies = workerCompileResult.localDependencies.reduce((result, dep) => {
+    // Make sure all the dependencies are up-to-date too
+    try {
+        for (const dep of localDependencyModules) {
+            const depPath = absolutePath(path, dep);
+            const depResult = await compileAndCache({
+                path: depPath,
+                readFile,
+                affectedModules,
+                fastRefresh,
+                signal,
+                timestamp
+            });
+            if (signal.aborted) throw new AbortError();
+            if (depResult.type === "failure") {
+                return depResult;
+            }
+        }
+    } finally {
+        // Make sure we clear the pending cache item of the parent if we exit early in the block above
+        if (compilerCache[path]?.status === "pending") delete compilerCache[path];
+    }
+
+    mod.localDependencies = localDependencyModules.reduce((result, dep) => {
         const depPath = absolutePath(path, dep);
         const cacheItem = compilerCache[depPath];
         assert(cacheItem, `${depPath} is missing in compiler cache`);
         assert(cacheItem.status !== "pending", `${depPath} is still pending in compiler cache`);
-        result[depPath] = cacheItem.mod.hash;
+        result[depPath] = cacheItem.mod.sourceHash;
         return result;
     }, {} as DependenciesDict);
 
     compilerCache[path] = {
         status: "done",
-        mod: {
-            path,
-            hash: workerCompileResult.hash,
-            codeBuffer: workerCompileResult.codeBuffer,
-            localDependencies,
-            componentsBySpecifier: (await workerCompileResult).componentsBySpecifier
-        }
+        mod
     };
+
     affectedModules.add(path);
 
     return {
         type: "success",
-        localDependencies,
-        componentsBySpecifier: workerCompileResult.componentsBySpecifier,
-        codeBuffer: workerCompileResult.codeBuffer,
-        hash: workerCompileResult.hash,
+        localDependencies: mod.localDependencies,
+        componentsBySpecifier: mod.componentsBySpecifier,
+        codeBuffer: mod.codeBuffer,
+        hash: mod.sourceHash,
         affectedModules,
         timestamp
     };

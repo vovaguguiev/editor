@@ -1,8 +1,8 @@
 import { expose, transfer } from "comlink";
 import { compile } from "./compiler";
+import { hashCode } from "../hashCode";
 
 export type CompilationResult = ResultSuccess | ResultFailure;
-
 interface ResultSuccess {
     type: "success";
     codeBuffer: ArrayBuffer;
@@ -11,7 +11,6 @@ interface ResultSuccess {
     hash: string;
     timestamp: number;
 }
-
 interface ResultFailure {
     type: "failure";
     error: Error;
@@ -28,11 +27,7 @@ const workerInterface = {
     ): Promise<CompilationResult> {
         console.log("worker: received code %dms", Date.now() - timestamp);
 
-        const sourceData = encoder.encode(sourceCode);
-        const sourceHashBuffer = await crypto.subtle.digest("SHA-1", sourceData.buffer);
-        const hashArray = Array.from(new Uint8Array(sourceHashBuffer));
-        // convert bytes to hex string
-        const sourceHash = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+        const sourceHash = String(hashCode(sourceCode));
         console.log("worker: source hashing done %dms", Date.now() - timestamp);
 
         try {
