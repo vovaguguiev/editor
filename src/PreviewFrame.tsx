@@ -15,7 +15,7 @@ export function PreviewFrame({ previewData }: { previewData: PreviewData | undef
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const [previewService, setPreviewService] = useState<Remote<PreviewService> | undefined>(undefined);
 
-    const key = previewData?.type === "componentData" ? previewData.modules[previewData.path].hash : "failure";
+    // const key = previewData?.type === "componentData" ? previewData.modules[previewData.path].hash : "failure";
     useEffect(() => {
         if (!previewService || previewData?.type !== "componentData") return;
 
@@ -26,7 +26,7 @@ export function PreviewFrame({ previewData }: { previewData: PreviewData | undef
             previewData.timestamp
         );
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [previewService, key]);
+    }, [previewService, previewData]);
 
     return (
         <iframe

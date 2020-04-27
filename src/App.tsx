@@ -10,6 +10,7 @@ export default function App() {
     const compilationControllerRef = useRef<AbortController | undefined>(undefined);
     const [previewData, setPreviewData] = useState<PreviewData | undefined>(undefined);
 
+    const [previewLock, setPreviewLock] = useState<{ path: string } | undefined>(undefined);
     const [fastRefreshEnabled, setFastRefreshEnabled] = useState(true);
 
     usePreventSave();
@@ -18,6 +19,8 @@ export default function App() {
     function readFile(path: string): string | undefined {
         return files[path]?.text;
     }
+
+    const previewFile = previewLock ? previewLock.path : selectedFile.name;
 
     // Replace the content of the editor and compile code when selecting a file
     useEffect(() => {
@@ -29,7 +32,7 @@ export default function App() {
         }
         compilationControllerRef.current = new AbortController();
         getPreviewData({
-            path: selectedFile.name,
+            path: previewFile,
             readFile,
             fastRefresh: fastRefreshEnabled,
             timestamp: Date.now(),
@@ -144,7 +147,7 @@ export default function App() {
                         }
                         compilationControllerRef.current = new AbortController();
                         getPreviewData({
-                            path: selectedFile.name,
+                            path: previewFile,
                             readFile,
                             fastRefresh: fastRefreshEnabled,
                             timestamp: Date.now(),
@@ -178,46 +181,90 @@ export default function App() {
                     backgroundColor: "white"
                 }}
             >
-                <div style={{ textAlign: "right", fontSize: 18, marginBottom: 10 }}>
-                    <label htmlFor="fast-refresh" style={{ userSelect: "none" }}>
-                        Fast Refresh™️
-                    </label>
-                    <input
-                        type="checkbox"
-                        id="fast-refresh"
-                        checked={fastRefreshEnabled}
-                        onChange={event => {
-                            const checked = event.currentTarget.checked;
-                            setFastRefreshEnabled(checked);
-
-                            // If we enable Fast Refresh we need to recompile the existing code,
-                            // so babel inserts necessary instrumentation
-                            if (checked) {
-                                if (compilationControllerRef.current) {
-                                    compilationControllerRef.current.abort();
-                                }
-                                compilationControllerRef.current = new AbortController();
-                                getPreviewData({
-                                    path: selectedFile.name,
-                                    readFile,
-                                    fastRefresh: true,
-                                    timestamp: Date.now(),
-                                    signal: compilationControllerRef.current.signal
-                                }).then(
-                                    r => {
-                                        setPreviewData(r);
-                                    },
-                                    err => {
-                                        if (err instanceof AbortError) {
-                                            console.warn("editor: getPreviewData aborted");
-                                            return;
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, marginBottom: 10 }}>
+                    <div>
+                        <label htmlFor="preview-lock" style={{ userSelect: "none" }}>
+                            Lock
+                        </label>
+                        <input
+                            type="checkbox"
+                            id="preview-lock"
+                            checked={Boolean(previewLock)}
+                            onChange={event => {
+                                const checked = event.currentTarget.checked;
+                                if (checked) {
+                                    setPreviewLock({ path: selectedFile.name });
+                                } else {
+                                    setPreviewLock(undefined);
+                                    if (previewFile !== selectedFile.name) {
+                                        if (compilationControllerRef.current) {
+                                            compilationControllerRef.current.abort();
                                         }
-                                        throw err;
+                                        compilationControllerRef.current = new AbortController();
+                                        getPreviewData({
+                                            path: selectedFile.name,
+                                            readFile,
+                                            fastRefresh: true,
+                                            timestamp: Date.now(),
+                                            signal: compilationControllerRef.current.signal
+                                        }).then(
+                                            r => {
+                                                setPreviewData(r);
+                                            },
+                                            err => {
+                                                if (err instanceof AbortError) {
+                                                    console.warn("editor: getPreviewData aborted");
+                                                    return;
+                                                }
+                                                throw err;
+                                            }
+                                        );
                                     }
-                                );
-                            }
-                        }}
-                    />
+                                }
+                            }}
+                        />
+                    </div>
+                    <div>
+                        <label htmlFor="fast-refresh" style={{ userSelect: "none" }}>
+                            Fast Refresh™️
+                        </label>
+                        <input
+                            type="checkbox"
+                            id="fast-refresh"
+                            checked={fastRefreshEnabled}
+                            onChange={event => {
+                                const checked = event.currentTarget.checked;
+                                setFastRefreshEnabled(checked);
+
+                                // If we enable Fast Refresh we need to recompile the existing code,
+                                // so babel inserts necessary instrumentation
+                                if (checked) {
+                                    if (compilationControllerRef.current) {
+                                        compilationControllerRef.current.abort();
+                                    }
+                                    compilationControllerRef.current = new AbortController();
+                                    getPreviewData({
+                                        path: previewFile,
+                                        readFile,
+                                        fastRefresh: true,
+                                        timestamp: Date.now(),
+                                        signal: compilationControllerRef.current.signal
+                                    }).then(
+                                        r => {
+                                            setPreviewData(r);
+                                        },
+                                        err => {
+                                            if (err instanceof AbortError) {
+                                                console.warn("editor: getPreviewData aborted");
+                                                return;
+                                            }
+                                            throw err;
+                                        }
+                                    );
+                                }
+                            }}
+                        />
+                    </div>
                 </div>
                 <PreviewFrame previewData={previewData} />
             </div>
