@@ -1,30 +1,32 @@
-import React, { useEffect, useRef } from "react";
-import { wrap, transfer, Remote } from "comlink";
-import { CompilationResult } from "./useCompiler";
-import { Meta } from "./compilerWorker/compiler";
+import React, { useEffect, useRef, useState } from "react";
+import { wrap, Remote } from "comlink";
+import { Module, PreviewData } from "./useCompiler";
 import { PREVIEW_ORIGIN } from "./config";
 
 type PreviewService = {
-    render: (meta: Meta, codeBuffer: ArrayBuffer, hash: string, timestamp: number) => void;
+    render: (
+        previewInfo: { path: string; componentSpecifier: string },
+        modules: { [path: string]: Module },
+        timestamp: number
+    ) => void;
 };
 
-export function PreviewFrame({ compilationResult }: { compilationResult: CompilationResult | undefined }) {
+export function PreviewFrame({ previewData }: { previewData: PreviewData | undefined }) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
-    const previewServiceRef = useRef<Remote<PreviewService> | undefined>(undefined);
+    const [previewService, setPreviewService] = useState<Remote<PreviewService> | undefined>(undefined);
 
-    const key = compilationResult?.type === "success" ? compilationResult.hash : "failure";
+    const key = previewData?.type === "componentData" ? previewData.modules[previewData.path].hash : "failure";
     useEffect(() => {
-        const previewService = previewServiceRef.current;
-        if (!previewService || compilationResult?.type !== "success") return;
+        if (!previewService || previewData?.type !== "componentData") return;
 
-        console.log("editor: sending compilation result to preview %dms", Date.now() - compilationResult.timestamp);
+        console.log("editor: sending compilation result to preview %dms", Date.now() - previewData.timestamp);
         previewService.render(
-            compilationResult.meta,
-            transfer(compilationResult.codeBuffer, [compilationResult.codeBuffer]),
-            compilationResult.hash,
-            compilationResult.timestamp
+            { path: previewData.path, componentSpecifier: previewData.componentSpecifier },
+            previewData.modules,
+            previewData.timestamp
         );
-    }, [key]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [previewService, key]);
 
     return (
         <iframe
@@ -42,15 +44,14 @@ export function PreviewFrame({ compilationResult }: { compilationResult: Compila
                 port1.addEventListener("message", async ev => {
                     if (ev.data !== "ready") return;
 
-                    const previewService = wrap<PreviewService>(port1);
-                    previewServiceRef.current = previewService;
+                    const service = wrap<PreviewService>(port1);
+                    setPreviewService(() => service);
 
-                    if (compilationResult?.type === "success") {
-                        previewService.render(
-                            compilationResult.meta,
-                            transfer(compilationResult.codeBuffer, [compilationResult.codeBuffer]),
-                            compilationResult.hash,
-                            compilationResult.timestamp
+                    if (previewData?.type === "componentData") {
+                        service.render(
+                            { path: previewData.path, componentSpecifier: previewData.componentSpecifier },
+                            previewData.modules,
+                            previewData.timestamp
                         );
                     }
                 });

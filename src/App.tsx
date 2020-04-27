@@ -1,94 +1,52 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useCompiler } from "./useCompiler";
+import { getPreviewData, PreviewData } from "./useCompiler";
 import { usePreventSave } from "./usePreventSave";
 import { PreviewFrame } from "./PreviewFrame";
-
-const initialSourceCode = `import * as React from 'react'
-import { useState } from 'react'
-import random from "https://unpkg.com/lodash-es/random"
-
-export function Foo() {
-    const [number, setNumber] = useState(undefined)
-
-    return (
-        <div
-            style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center"
-            }}
-        >
-            <h2
-                style={{ opacity: number != null ? 1 : 0 }}>Your lucky number is</h2>
-            <h1 style={{ opacity: number != null ? 1 : 0 }}>{number != null ? number : "00"}</h1>
-            <button
-                style={{
-                    marginTop: 20,
-                    backgroundColor: "plum",
-                    border: "2px solid black",
-                    borderRadius: '8px',
-                    height: 40,
-                    fontSize: 16
-                }}
-                onClick={() => { setNumber(random(1, 100)) }}
-            >
-                Click to get your lucky number
-            </button>
-        </div>
-    )
-}
-`;
-const initialButtonCode = `import * as React from "react"
-import { ReactNode } from "react"
-
-interface Props { 
-    children: ReactNode;
-    onClick: (event: MouseEvent) => void;
-}
-
-export function Button({ children, onClick }: Props) {
-    return (
-        <button
-            style={{
-                backgroundColor: "plum",
-                border: "2px solid black",
-                borderRadius: '8px',
-                height: 40,
-                fontSize: 16
-            }}
-            onClick={onClick}
-        >
-            {children}
-        </button>
-    )
-}
-
-Button.defaultProps = {
-    children: "🥑 Avocado",
-    onClick() { alert("Click!") }
-}
-`;
+import { useFiles } from "./useFiles";
+import { AbortError } from "./AbortError";
 
 export default function App() {
     const codeRef = useRef<HTMLElement>(null);
+    const compilationControllerRef = useRef<AbortController | undefined>(undefined);
+    const [previewData, setPreviewData] = useState<PreviewData | undefined>(undefined);
 
     const [fastRefreshEnabled, setFastRefreshEnabled] = useState(true);
 
-    const { result, compile } = useCompiler(fastRefreshEnabled, initialSourceCode);
-
     usePreventSave();
 
-    const [files, setFiles] = useState<{ [fileName: string]: { text: string } }>({
-        "index.js": { text: initialSourceCode },
-        "Button.js": { text: initialButtonCode }
-    });
-    const [selectedFileName, setSelectedFileName] = useState<string>("index.js");
-    const selectedFile = files[selectedFileName];
-    // Replace the content of the editor when selecting a different file
+    const { files, selectedFile, add, setText, setSelected } = useFiles();
+    function readFile(path: string): string | undefined {
+        return files[path]?.text;
+    }
+
+    // Replace the content of the editor and compile code when selecting a file
     useEffect(() => {
         if (!codeRef.current) return;
         codeRef.current.innerText = selectedFile.text;
-        compile(selectedFile.text, Date.now(), fastRefreshEnabled);
+
+        if (compilationControllerRef.current) {
+            compilationControllerRef.current.abort();
+        }
+        compilationControllerRef.current = new AbortController();
+        getPreviewData({
+            path: selectedFile.name,
+            readFile,
+            fastRefresh: fastRefreshEnabled,
+            timestamp: Date.now(),
+            signal: compilationControllerRef.current.signal
+        }).then(
+            r => {
+                setPreviewData(r);
+            },
+            err => {
+                if (err instanceof AbortError) {
+                    console.warn("editor: getPreviewData aborted");
+                    return;
+                }
+                throw err;
+            }
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedFile]);
 
     return (
@@ -102,12 +60,10 @@ export default function App() {
         >
             <div
                 style={{
-                    width: "150px",
+                    width: "200px",
                     height: "100%",
-                    padding: "20px 0",
                     boxSizing: "border-box",
-                    background: "white",
-                    borderRight: "1px solid white"
+                    background: "white"
                 }}
             >
                 <h3
@@ -116,7 +72,8 @@ export default function App() {
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        paddingLeft: 10
+                        padding: "10px 0 10px 10px",
+                        borderBottom: "2px solid black"
                     }}
                 >
                     Files{" "}
@@ -129,13 +86,7 @@ export default function App() {
                                 alert(`${fileName} already exists`);
                                 return;
                             }
-                            setFiles(files => {
-                                return {
-                                    ...files,
-                                    [fileName]: { text: "" }
-                                };
-                            });
-                            setSelectedFileName(fileName);
+                            add(fileName, "");
                         }}
                     >
                         ＋
@@ -152,10 +103,10 @@ export default function App() {
                                     userSelect: "none",
                                     fontSize: "14px",
                                     borderLeft:
-                                        fileName === selectedFileName ? "3px solid plum" : "3px solid transparent",
-                                    background: fileName === selectedFileName ? "lavender" : "transparent"
+                                        fileName === selectedFile.name ? "3px solid gray" : "3px solid transparent",
+                                    background: fileName === selectedFile.name ? "#ececec" : "transparent"
                                 }}
-                                onClick={() => setSelectedFileName(fileName)}
+                                onClick={() => setSelected(fileName)}
                             >
                                 {fileName}
                             </li>
@@ -164,7 +115,7 @@ export default function App() {
             </div>
             <div
                 style={{
-                    width: "calc(50% - 75px)",
+                    width: "calc(50% - 50px)",
                     height: "100%",
                     padding: 20,
                     boxSizing: "border-box"
@@ -184,10 +135,32 @@ export default function App() {
                     onInput={e => {
                         const code = e.currentTarget.innerText;
                         if (!code) return;
+                        setText(selectedFile.name, code);
+
                         console.log("----");
                         console.log("editor: sending code to worker");
-                        selectedFile.text = code;
-                        compile(code, Date.now(), fastRefreshEnabled);
+                        if (compilationControllerRef.current) {
+                            compilationControllerRef.current.abort();
+                        }
+                        compilationControllerRef.current = new AbortController();
+                        getPreviewData({
+                            path: selectedFile.name,
+                            readFile,
+                            fastRefresh: fastRefreshEnabled,
+                            timestamp: Date.now(),
+                            signal: compilationControllerRef.current.signal
+                        }).then(
+                            r => {
+                                setPreviewData(r);
+                            },
+                            err => {
+                                if (err instanceof AbortError) {
+                                    console.warn("editor: getPreviewData aborted");
+                                    return;
+                                }
+                                throw err;
+                            }
+                        );
                     }}
                     onKeyDown={e => {
                         if (e.key !== "Tab") return;
@@ -198,7 +171,7 @@ export default function App() {
             </div>
             <div
                 style={{
-                    width: "calc(50% - 75px)",
+                    width: "calc(50% - 150px)",
                     padding: 20,
                     height: "100%",
                     boxSizing: "border-box",
@@ -219,13 +192,34 @@ export default function App() {
 
                             // If we enable Fast Refresh we need to recompile the existing code,
                             // so babel inserts necessary instrumentation
-                            if (checked && codeRef.current && codeRef.current.innerText) {
-                                compile(codeRef.current.innerText, Date.now(), true);
+                            if (checked) {
+                                if (compilationControllerRef.current) {
+                                    compilationControllerRef.current.abort();
+                                }
+                                compilationControllerRef.current = new AbortController();
+                                getPreviewData({
+                                    path: selectedFile.name,
+                                    readFile,
+                                    fastRefresh: true,
+                                    timestamp: Date.now(),
+                                    signal: compilationControllerRef.current.signal
+                                }).then(
+                                    r => {
+                                        setPreviewData(r);
+                                    },
+                                    err => {
+                                        if (err instanceof AbortError) {
+                                            console.warn("editor: getPreviewData aborted");
+                                            return;
+                                        }
+                                        throw err;
+                                    }
+                                );
                             }
                         }}
                     />
                 </div>
-                <PreviewFrame compilationResult={result} />
+                <PreviewFrame previewData={previewData} />
             </div>
         </div>
     );

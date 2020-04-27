@@ -26,62 +26,54 @@
 
         <script src="https://unpkg.com/react@16/umd/react.development.js" crossorigin></script>
         <script src="https://unpkg.com/react-dom@16/umd/react-dom.development.js" crossorigin></script>
+        <script src="https://unpkg.com/redbox-react@1.6.0/dist/redbox.min.js" crossorigin></script>
     </head>
     <body>
         <div id="preview"></div>
         <script type="module">
             import * as Comlink from "https://unpkg.com/comlink/dist/esm/comlink.mjs";
+            const Redbox = redbox.default;
 
             window.addEventListener("message", ev => {
                 if (ev.data !== "init") return;
 
-                const portToParent = ev.ports[0];
-                portToParent.start();
-                portToParent.postMessage("ready");
-                Comlink.expose({ render }, portToParent);
+                const portToEditor = ev.ports[0];
+                portToEditor.start();
+                portToEditor.postMessage("ready");
+                Comlink.expose({ render }, portToEditor);
             });
 
+            const moduleCache = {};
+
             // FIXME: cancel the pending render if the new one is requested
-            async function render(meta, codeArrayBuffer, hash, timestamp) {
+            async function render({ path, componentSpecifier }, modules, timestamp) {
                 console.log("preview: received code %dms", Date.now() - timestamp);
-                const blob = new Blob([codeArrayBuffer], {
-                    type: "text/javascript;charset=utf-8"
-                });
 
-                const sourceFileURL = URL.createObjectURL(blob);
-
+                let component;
+                let error;
                 try {
-                    // prepare React Fast Refresh runtime
-                    const prevRefreshReg = window.$RefreshReg$;
-                    const prevRefreshSig = window.$RefreshSig$;
-                    window.$RefreshReg$ = (type, id) => {
-                        // FIXME: use "real" file name
-                        const fullId = "index.js" + " " + id;
-                        RefreshRuntime.register(type, fullId);
-                    };
-                    window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
-
-                    const mod = await import(sourceFileURL);
-                    // Dispose the previously created source file
-                    URL.revokeObjectURL(sourceFileURL);
-
-                    // cleanup React Fast Refresh runtime
-                    window.$RefreshReg$ = prevRefreshReg;
-                    window.$RefreshSig$ = prevRefreshSig;
-                    if (isReactRefreshBoundary(mod)) {
-                        // TODO: debounce this call if there multiple modules
+                    const { exports, shouldPerformReactRefresh } = await loadLocalModule(
+                        path,
+                        modules[path].hash,
+                        modules,
+                        moduleCache
+                    );
+                    component = exports[componentSpecifier];
+                    if (shouldPerformReactRefresh) {
                         RefreshRuntime.performReactRefresh();
                     }
-
                     console.log("preview: code evaluated %c%dms", "color: yellow", Date.now() - timestamp);
-                    // first exported component
-                    const componentSpecifiers = Object.keys(meta.componentsBySpecifier);
-                    const component = componentSpecifiers.length > 0 ? mod[componentSpecifiers[0]] : null;
+                } catch (err) {
+                    console.error("preview: error evaluating code\n", err);
+                    error = err;
+                }
+
+                try {
                     ReactDOM.render(
                         React.createElement(
                             Preview,
                             {
-                                /*key: hash*/
+                                error
                             },
                             component ? React.createElement(component) : null
                         ),
@@ -109,21 +101,100 @@
 
                 render() {
                     const error = this.props.error || this.state.error;
-                    console.log({
-                        stateError: this.state.error,
-                        propsError: this.props.error
-                    });
-
                     if (error) {
-                        return React.createElement(
-                            "code",
-                            { style: { fontSize: 13, whiteSpace: "pre-wrap" } },
-                            error.toString()
-                        );
+                        return React.createElement(Redbox, { error });
                     }
 
                     return this.props.children ?? null;
                 }
+            }
+
+            function createLocalModuleLoader(basePath) {
+                return function __$LocalModulesLoader$__(relModulePath) {
+                    const moduleAbsPath = absolutePath(basePath, relModulePath);
+                    if (!moduleCache[moduleAbsPath]) throw new Error(`Module ${moduleAbsPath} is not loaded.`);
+
+                    return moduleCache[moduleAbsPath].exports;
+                };
+            }
+
+            async function loadLocalModule(modPath, modHash, modules, cache, shouldPerformReactRefresh = false) {
+                const mod = modules[modPath];
+                if (!mod) throw new Error(`${mod} is not present in module descriptors`);
+
+                const cachedMod = cache[modPath];
+                let needsEvaluation =
+                    !cachedMod ||
+                    cachedMod.hash !== modHash ||
+                    Object.entries(mod.localDependencies).some(([depPath, depHash]) => {
+                        return (
+                            !cachedMod.localDependencies[depPath] ||
+                            cachedMod.localDependencies[depPath].hash !== depHash
+                        );
+                    });
+
+                if (needsEvaluation) {
+                    cache[modPath] = {
+                        hash: mod.hash,
+                        localDependencies: mod.localDependencies,
+                        // code: m.code,
+                        exports: {}
+                    };
+                }
+
+                for (const [depPath, depHash] of Object.entries(mod.localDependencies)) {
+                    const { wasEvaluated } = await loadLocalModule(
+                        depPath,
+                        depHash,
+                        modules,
+                        cache,
+                        shouldPerformReactRefresh
+                    );
+                    // if a dependency was evaluated we need to (re-)evaluate the dependent module too
+                    if (wasEvaluated) needsEvaluation = true;
+                }
+
+                if (!needsEvaluation) {
+                    const { exports } = cache[modPath];
+                    return {
+                        wasEvaluated: false,
+                        exports,
+                        shouldPerformReactRefresh: isReactRefreshBoundary(exports)
+                    };
+                }
+
+                const blob = new Blob([mod.codeBuffer], {
+                    type: "text/javascript;charset=utf-8"
+                });
+                const sourceFileURL = URL.createObjectURL(blob);
+
+                // Prepare React Fast Refresh runtime
+                const prevRefreshReg = window.$RefreshReg$;
+                const prevRefreshSig = window.$RefreshSig$;
+                window.$RefreshReg$ = (type, id) => {
+                    // FIXME: use "real" file name
+                    const fullId = `${modPath}_${id}`;
+                    RefreshRuntime.register(type, fullId);
+                };
+                window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+                // Prepare loader
+                window.__$LocalModulesLoader$__ = createLocalModuleLoader(modPath);
+
+                // Evaluate module
+                // FIXME: this might lead to constant browser module cache growth, how can we solve it?
+                const exports = await import(sourceFileURL);
+                URL.revokeObjectURL(sourceFileURL);
+                Object.assign(cache[modPath].exports, exports);
+
+                // Cleanup loader
+                window.__$LocalModulesLoader$__ = undefined;
+                // Cleanup React Fast Refresh runtime
+                window.$RefreshReg$ = prevRefreshReg;
+                window.$RefreshSig$ = prevRefreshSig;
+
+                shouldPerformReactRefresh = isReactRefreshBoundary(exports);
+
+                return { exports, wasEvaluated: needsEvaluation, shouldPerformReactRefresh };
             }
 
             function isReactRefreshBoundary(moduleExports) {
@@ -152,6 +223,12 @@
                     }
                 }
                 return hasExports && areAllExportsComponents;
+            }
+
+            function absolutePath(baseAbsolutePath, relativePath) {
+                const url = new URL(relativePath, `https://example.com/${baseAbsolutePath}`);
+                // remove leading slash
+                return url.pathname.substring(1);
             }
         </script>
     </body>
